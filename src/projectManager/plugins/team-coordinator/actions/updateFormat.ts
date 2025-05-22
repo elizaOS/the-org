@@ -36,30 +36,33 @@ export const updatesFormatAction: Action = {
   name: 'UPDATES_FORMAT',
   description: 'Show the updates format for a specific team member.',
   similes: ['UPDATES_FORMAT', 'SHOW_FORMAT', 'GET_FORMAT', 'MY_FORMAT', 'VIEW_FORMAT'],
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
     try {
-      // Store the username in state for the handler
-      state.data.username = message.name;
+      if (!state) return false;
+      
+      // Store the user ID in state for the handler
       state.data.userId = message.entityId;
 
-      logger.info(`Valid request to get updates format for user ${message.name}`);
+      logger.info(`Valid request to get updates format for user ${message.entityId}`);
       return true;
-    } catch (error) {
-      logger.error('Error in updatesFormatAction validation:', error);
-      logger.error(`Error stack: ${error.stack}`);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error in updatesFormatAction validation:', err);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
       return false;
     }
   },
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
       logger.info('=== UPDATES-FORMAT HANDLER START ===');
 
+      if (!state) return false;
       if (!callback) {
         logger.warn('No callback function provided');
         return false;
@@ -113,8 +116,9 @@ export const updatesFormatAction: Action = {
 
       // Extract all team members from all configs
       teamMemberConfigs.forEach((config) => {
-        if (config.content?.config?.teamMembers) {
-          const teamMembers = config.content.config.teamMembers as TeamMember[];
+        if (config.content?.config) {
+          const configData = config.content.config as { teamMembers: TeamMember[] };
+          const teamMembers = configData.teamMembers || [];
           logger.info(`Found ${teamMembers.length} team members in config`);
           allTeamMembers = [...allTeamMembers, ...teamMembers];
         }
@@ -185,10 +189,11 @@ export const updatesFormatAction: Action = {
 
       logger.info('=== UPDATES-FORMAT HANDLER END ===');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== UPDATES-FORMAT HANDLER ERROR ===');
-      logger.error(`Error processing updates format request: ${error}`);
-      logger.error(`Error stack: ${error.stack}`);
+      logger.error(`Error processing updates format request: ${err}`);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
 
       if (callback) {
         await callback(

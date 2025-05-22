@@ -10,7 +10,7 @@ import {
   ModelType,
   composePromptFromState,
 } from '@elizaos/core';
-import { PermissionsBitField } from 'discord.js';
+import { type PermissionsBitField, getPermissionsBitField } from '../../../../utils/discordHelper';
 
 export const getTimeoutUserTemplate = (thoughts?: string) => {
   return `
@@ -112,7 +112,7 @@ type PlatformHandlerParams = {
   runtime: IAgentRuntime;
   message: Memory;
   state: State;
-  callback: HandlerCallback;
+  callback: HandlerCallback | ((content: any) => Promise<any>);
   responses?: Memory[];
 };
 
@@ -152,7 +152,9 @@ const handleDiscordTimeout = async (params: PlatformHandlerParams): Promise<bool
   const guild = client.client.guilds.cache.get(serverId);
   if (!guild) return false;
 
-  if (!guild.members.me?.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+  const PermissionsBitFieldClass = await getPermissionsBitField();
+
+  if (!guild.members.me?.permissions.has(PermissionsBitFieldClass.Flags.ModerateMembers)) {
     await callback({
       text: `Missing **Moderate Members** permission.`,
       source: 'discord',
@@ -230,26 +232,35 @@ export const timeoutUser: Action = {
   name: 'TIMEOUT_USER',
   similes: ['TIMEOUT_USER', 'MODERATION_TIMEOUT', 'FUD_TIMEOUT'],
   description: 'Timeout users who are spreading FUD, spamming, or using inappropriate language.',
-  validate: async (runtime, message, state) => {
+  validate: async (runtime, message, state: State | undefined) => {
     if (message.content.source !== 'discord' && message.content.source !== 'telegram') {
       return false;
     }
+    if (!state) return false;
     const room = state.data.room ?? (await runtime.getRoom(message.roomId));
     return room?.type === ChannelType.GROUP;
   },
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: State,
+    state: State | undefined,
     _options: any,
-    callback: HandlerCallback,
+    callback: HandlerCallback | undefined,
     responses?: Memory[]
   ): Promise<boolean> => {
+    if (!state) return false;
     const source = message.content.source;
-    const params = { runtime, message, state, callback, responses };
+    const params = {
+      runtime,
+      message,
+      state,
+      callback: callback || ((content) => Promise.resolve(content)),
+      responses,
+    };
 
     if (source === 'discord') return await handleDiscordTimeout(params);
     if (source === 'telegram') return await handleTelegramTimeout(params);
+    return false; // Default return for when source is neither discord nor telegram
   },
   examples: [
     [
@@ -271,7 +282,7 @@ export const timeoutUser: Action = {
       {
         name: '{{name1}}',
         content: {
-          text: 'fuck this project it’s going to zero',
+          text: "fuck this project it's going to zero",
         },
       },
       {
@@ -286,7 +297,7 @@ export const timeoutUser: Action = {
       {
         name: '{{name1}}',
         content: {
-          text: 'I’m done with this crap — total rug',
+          text: "I'm done with this crap — total rug",
         },
       },
       {
@@ -301,7 +312,7 @@ export const timeoutUser: Action = {
       {
         name: '{{name1}}',
         content: {
-          text: 'absolute garbage project, can’t believe people buy this',
+          text: "absolute garbage project, can't believe people buy this",
         },
       },
       {

@@ -1,16 +1,16 @@
 // biome-ignore lint/style/useImportType: <explanation>
 import type { IAgentRuntime, Plugin } from '@elizaos/core';
 // import { checkInFormatAction } from './actions/checkInFormatAction';
-import { CheckInService } from './services/CheckInService';
+import { CheckInService } from './services/checkInService';
 import { logger } from '@elizaos/core';
-import { listCheckInSchedules } from './actions/listCheckInSchedules';
-import { TeamUpdateTrackerService } from './services/TeamUpdateTrackerService';
-import { recordCheckInAction } from './actions/recordCheckInAction';
-import { generateReport } from './actions/reportGenerationAction';
-import { teamMemberUpdatesAction } from './actions/teamMemberUpdates';
-import { addTeamMemberAction } from './actions/addTeamMemberAction';
-import { listTeamMembersAction } from './actions/listTeamMembersAction';
-import { updatesFormatAction } from './actions/updatesFormatAction';
+import { listCheckInSchedules } from './actions/checkInList';
+import { TeamUpdateTrackerService } from './services/updateTracker';
+import { recordCheckInAction } from './actions/checkInCreate';
+import { generateReport } from './actions/reportGenerate';
+import { teamMemberUpdatesAction } from './actions/teamMemberUpdate';
+import { addTeamMemberAction } from './actions/teamMemberAdd';
+import { listTeamMembersAction } from './actions/teamMembersList';
+import { updatesFormatAction } from './actions/updateFormat';
 import { registerTasks } from './tasks';
 
 /**
@@ -40,8 +40,8 @@ export const teamCoordinatorPlugin: Plugin = {
       await runtime.registerService(TeamUpdateTrackerService);
 
       // Register and start the CheckIn service
-      logger.info('Registering CheckInService...');
-      await runtime.registerService(CheckInService);
+      // logger.info('Registering CheckInService...');
+      // await runtime.registerService(CheckInService);
 
       // Register tasks
       logger.info('Registering team coordinator tasks...');

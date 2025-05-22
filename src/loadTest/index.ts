@@ -134,7 +134,7 @@ export class AgentLoadTestSuite implements TestSuite {
                 detailedLogFile,
                 `\n*** FATAL ERROR - BREAKING POINT IDENTIFIED (${thresholdLevel} threshold) ***\n` +
                   `Test failed catastrophically at ${config.agents} agents with error:\n` +
-                  `${error.message}\n`
+                  `${error instanceof Error ? error.message : String(error)}\n`
               );
               fs.appendFileSync(
                 summaryLogFile,
@@ -300,7 +300,7 @@ export class AgentLoadTestSuite implements TestSuite {
             }
           } catch (timeoutError) {
             metrics.errorCount++;
-            if (timeoutError.message.includes('timeout')) {
+            if (timeoutError instanceof Error && timeoutError.message.includes('timeout')) {
               metrics.timeoutCount++;
               metrics.errorTypes['timeout'] = (metrics.errorTypes['timeout'] || 0) + 1;
             } else {

@@ -1,6 +1,42 @@
 import { type Content, logger, type IAgentRuntime } from '@elizaos/core';
 import type { HandlerCallback } from '@elizaos/core';
 
+// Define interfaces for Discord component types
+interface DiscordComponent {
+  type: number;
+}
+
+interface DiscordActionRow extends DiscordComponent {
+  type: 1;
+  components: DiscordComponent[];
+}
+
+interface DiscordTextInput extends DiscordComponent {
+  type: 4;
+  custom_id: string;
+  value: string;
+  style: number;
+}
+
+interface DiscordSelectMenu extends DiscordComponent {
+  type: 3;
+  custom_id: string;
+  placeholder: string;
+  options: Array<{
+    label: string;
+    value: string;
+    description: string;
+  }>;
+  required?: boolean;
+}
+
+interface DiscordButton extends DiscordComponent {
+  type: 2;
+  style: number;
+  custom_id: string;
+  label: string;
+}
+
 /**
  * Sends a check-in report form to Discord
  * @param callback - The callback function to handle form submission
@@ -43,7 +79,7 @@ export async function sendCheckInReportForm(
   }
 
   // IMPORTANT: Discord API limits messages to 5 action rows maximum
-  const formComponents = [];
+  const formComponents: DiscordActionRow[] = [];
   logger.debug('Building form components...');
 
   // Add server info as a hidden field instead of select menu
@@ -57,7 +93,7 @@ export async function sendCheckInReportForm(
           serverId: serverInfo?.serverId,
         }),
         style: 2, // HIDDEN
-      },
+      } as DiscordTextInput,
     ],
   });
 
@@ -72,7 +108,7 @@ export async function sendCheckInReportForm(
           placeholder: 'Select channel to send check-in updates',
           options: channelOptions,
           required: true,
-        },
+        } as DiscordSelectMenu,
       ],
     });
     logger.debug('Added channel selector for check-in updates');
@@ -87,13 +123,13 @@ export async function sendCheckInReportForm(
         style: 1, // PRIMARY
         custom_id: 'submit_report_channel',
         label: 'Confirm Channel',
-      },
+      } as DiscordButton,
       {
         type: 2, // BUTTON
         style: 2, // SECONDARY
         custom_id: 'cancel_report_setup',
         label: 'Cancel',
-      },
+      } as DiscordButton,
     ],
   });
   logger.debug('Added submit/cancel buttons');
@@ -123,9 +159,10 @@ export async function sendCheckInReportForm(
 
     await callback(content, []);
     logger.info('Successfully sent check-in report form');
-  } catch (error) {
-    logger.error(`Error sending check-in report form: ${error}`);
-    logger.error('Error stack:', error.stack);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`Error sending check-in report form: ${err}`);
+    logger.error('Error stack:', err.stack);
     throw error;
   }
 }

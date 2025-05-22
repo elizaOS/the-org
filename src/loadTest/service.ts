@@ -1,4 +1,4 @@
-import { Service, IAgentRuntime, UUID } from '@elizaos/core';
+import { Service, IAgentRuntime } from '@elizaos/core';
 
 export class LoadTestService extends Service {
   static serviceType = 'load-test';

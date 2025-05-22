@@ -8,6 +8,7 @@ import {
   type UUID,
   createUniqueUuid,
   logger,
+  type State,
 } from '@elizaos/core';
 import type { TeamMemberUpdate } from '../../../types';
 
@@ -187,13 +188,14 @@ export const generateReport: Action = {
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
       logger.info('=== GENERATE REPORT HANDLER START ===');
 
+      if (!state) return false;
       if (!callback) {
         logger.warn('No callback function provided');
         return false;
@@ -283,12 +285,13 @@ export const generateReport: Action = {
       await callback(content, []);
       logger.info('=== GENERATE REPORT HANDLER END ===');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== GENERATE REPORT HANDLER ERROR ===');
       logger.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
+        name: err.name || 'Unknown error',
+        message: err.message || 'No error message',
+        stack: err.stack || 'No stack trace',
       });
 
       if (callback) {

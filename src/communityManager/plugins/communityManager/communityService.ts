@@ -45,8 +45,8 @@ export class CommunityManagerService extends Service {
       logger.warn('World not found!');
       return null;
     }
-    const shouldGreetUser = world.metadata?.settings['SHOULD_GREET_NEW_PERSONS']?.value;
-    const greetChannel = world.metadata?.settings['GREETING_CHANNEL']?.value;
+    const shouldGreetUser = world.metadata?.settings?.['SHOULD_GREET_NEW_PERSONS']?.value;
+    const greetChannel = world.metadata?.settings?.['GREETING_CHANNEL']?.value;
 
     if (
       !(

@@ -11,6 +11,7 @@ import {
   logger,
   asUUID,
   type Service,
+  type State,
   ModelType,
 } from '@elizaos/core';
 import type { TeamMemberUpdate } from '../../../types';
@@ -43,6 +44,12 @@ interface IDiscordService extends Service {
   };
 }
 
+interface ReportChannelConfig {
+  serverId?: string;
+  channelId?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Posts team member update to the configured Discord channel for the server
  */
@@ -67,7 +74,7 @@ async function postUpdateToDiscordChannel(
     logger.info('Generated roomId for config:', roomId);
 
     const memories = await runtime.getMemories({
-      roomId: roomId as UUID,
+      roomId: roomId,
       tableName: 'messages',
     });
 
@@ -75,7 +82,7 @@ async function postUpdateToDiscordChannel(
       count: memories.length,
       configs: memories.map((m) => ({
         type: m.content?.type,
-        channelId: m.content?.config?.channelId,
+        channelId: m.content?.config ? (m.content.config as ReportChannelConfig).channelId : undefined,
       })),
     });
 
@@ -86,7 +93,7 @@ async function postUpdateToDiscordChannel(
     logger.info(`Found ${guilds.size} Discord servers`);
 
     // Find the guild that matches the server name exactly
-    let targetGuild = null;
+    let targetGuild: { name: string; id: string; channels: any } | null = null;
     for (const guild of guilds.values()) {
       logger.info(`Checking guild: ${guild.name} against update server name: ${update.serverName}`);
       if (guild.name === update.serverName) {
@@ -103,11 +110,12 @@ async function postUpdateToDiscordChannel(
 
     // Find config for this server
     const config = memories.find((memory) => {
-      const serverMatch = targetGuild?.id;
+      const serverMatch = targetGuild ? targetGuild.id : undefined;
+      const configData = memory.content?.config as ReportChannelConfig | undefined;
       logger.info(`Checking config:`, {
         configType: memory.content?.type,
-        configServerId: memory.content?.config?.serverId,
-        targetGuildId: targetGuild?.id,
+        configServerId: configData?.serverId,
+        targetGuildId: targetGuild ? targetGuild.id : undefined,
         matches: serverMatch,
       });
       return memory.content?.type === 'report-channel-config' && serverMatch;
@@ -120,14 +128,15 @@ async function postUpdateToDiscordChannel(
       return false;
     }
 
+    const configData = config.content.config as ReportChannelConfig;
     logger.info('Found report channel config:', {
       configId: config.id,
       configType: config.content?.type,
-      configServerId: targetGuild?.id,
-      configChannelId: config.content?.config?.channelId,
+      configServerId: targetGuild.id,
+      configChannelId: configData?.channelId,
     });
 
-    const channelId = config.content?.config?.channelId;
+    const channelId = configData?.channelId;
     if (!channelId) {
       logger.warn('No channel ID in config');
       return false;
@@ -195,12 +204,13 @@ async function postUpdateToDiscordChannel(
     logger.info('Successfully sent team member update to Discord');
     logger.info('=== POST TEAM MEMBER UPDATE TO DISCORD END ===');
     return true;
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     logger.error('=== POST TEAM MEMBER UPDATE TO DISCORD ERROR ===');
     logger.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
+      name: err.name || 'Unknown',
+      message: err.message || 'No message',
+      stack: err.stack || 'No stack trace',
     });
     return false;
   }
@@ -250,12 +260,13 @@ async function storeTeamMemberUpdate(
     logger.info('Successfully stored team member update');
     logger.info('=== STORE TEAM MEMBER UPDATE END ===');
     return true;
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     logger.error('=== STORE TEAM MEMBER UPDATE ERROR ===');
     logger.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
+      name: err.name || 'Unknown',
+      message: err.message || 'No message',
+      stack: err.stack || 'No stack trace',
     });
     return false;
   }
@@ -355,12 +366,13 @@ async function parseTeamMemberUpdate(
     logger.info('Successfully parsed team member update:', update);
     logger.info('=== PARSE TEAM MEMBER UPDATE END ===');
     return update;
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     logger.error('=== PARSE TEAM MEMBER UPDATE ERROR ===');
     logger.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
+      name: err.name || 'Unknown',
+      message: err.message || 'No message',
+      stack: err.stack || 'No stack trace',
     });
     throw error; // Propagate the error to handle it in the handler
   }
@@ -383,8 +395,8 @@ export const teamMemberUpdatesAction: Action = {
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
@@ -393,8 +405,8 @@ export const teamMemberUpdatesAction: Action = {
         messageId: message.id,
         entityId: message.entityId,
         hasCallback: !!callback,
-        stateKeys: Object.keys(state),
-        contextKeys: Object.keys(context),
+        stateKeys: state ? Object.keys(state) : [],
+        optionsKeys: Object.keys(options),
       });
       logger.info('Processing message:', {
         id: message.id,
@@ -470,9 +482,10 @@ End your message with "sending my updates"`;
         logger.info('Successfully recorded team member update');
         logger.info('=== RECORD TEAM MEMBER UPDATES HANDLER END ===');
         return true;
-      } catch (error) {
-        if (error.message.startsWith('MISSING_FIELDS:')) {
-          const missingFields = error.message.split(':')[1].split(',');
+      } catch (error: unknown) {
+        const err = error as Error;
+        if (err.message && err.message.startsWith('MISSING_FIELDS:')) {
+          const missingFields = err.message.split(':')[1].split(',');
           const missingFieldsList = missingFields.join(', ');
 
           await callback(
@@ -491,7 +504,7 @@ Remember to end your message with "sending my updates"`,
           );
           return false;
         }
-
+        
         // Handle other errors
         logger.error('Unexpected error:', error);
         await callback(
@@ -503,12 +516,13 @@ Remember to end your message with "sending my updates"`,
         );
         return false;
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== RECORD TEAM MEMBER UPDATES HANDLER ERROR ===');
       logger.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
+        name: err.name || 'Unknown',
+        message: err.message || 'No message',
+        stack: err.stack || 'No stack trace',
       });
 
       if (callback) {

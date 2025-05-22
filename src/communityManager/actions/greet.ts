@@ -25,7 +25,8 @@ export const greetAction: Action = {
   name: 'GREET_NEW_PERSON',
   similes: ['WELCOME_USER', 'SAY_HELLO', 'INTRODUCE'],
   description: 'Greets new users in the configured channel',
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<boolean> => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
+    if (!state) return false;
     const room = state.data.room ?? (await runtime.getRoom(message.roomId));
     if (!room) {
       throw new Error('No room found');
@@ -46,10 +47,11 @@ export const greetAction: Action = {
       }
 
       // Check if this is a new user join event or command to greet
-      const isNewUser = message.content.text.includes('joined the server');
+      const isNewUser = message.content.text?.includes('joined the server') || false;
       const isGreetCommand =
-        message.content.text?.toLowerCase().includes('greet') ||
-        message.content.text?.toLowerCase().includes('welcome');
+        message.content.text?.toLowerCase()?.includes('greet') ||
+        message.content.text?.toLowerCase()?.includes('welcome') ||
+        false;
 
       return isNewUser || isGreetCommand;
     } catch (error) {
@@ -61,10 +63,11 @@ export const greetAction: Action = {
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: State,
+    state: State | undefined,
     _options: any,
-    callback: HandlerCallback
+    callback: HandlerCallback | undefined
   ): Promise<void> => {
+    if (!state) return;
     const room = state.data.room ?? (await runtime.getRoom(message.roomId));
     if (!room) {
       throw new Error('No room found');
@@ -123,7 +126,7 @@ export const greetAction: Action = {
       );
 
       // Send greeting
-      await callback(content);
+      await callback?.(content);
     } catch (error) {
       logger.error('Error in greet handler:', error);
     }

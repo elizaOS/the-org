@@ -7,6 +7,7 @@ import {
   type UUID,
   createUniqueUuid,
   logger,
+  type State,
 } from '@elizaos/core';
 import type { CheckInSchedule } from '../../../types';
 
@@ -52,7 +53,6 @@ export async function fetchCheckInSchedules(runtime: IAgentRuntime): Promise<Che
         const schedule = memory.content?.schedule as CheckInSchedule;
         logger.info(`Processing schedule from memory ${memory.id}:`, {
           scheduleId: schedule?.scheduleId,
-          teamMemberId: schedule?.teamMemberId,
           frequency: schedule?.frequency,
         });
         return schedule;
@@ -72,12 +72,13 @@ export async function fetchCheckInSchedules(runtime: IAgentRuntime): Promise<Che
     logger.info('All schedules:', JSON.stringify(schedules, null, 2));
     logger.info('=== END DETAILED SCHEDULES LOG ===');
     return schedules;
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     logger.error('=== FETCH CHECK-IN SCHEDULES ERROR ===');
     logger.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
+      name: err.name || 'Unknown error',
+      message: err.message || 'No error message',
+      stack: err.stack || 'No stack trace',
     });
     throw error;
   }
@@ -121,8 +122,8 @@ export const listCheckInSchedules: Action = {
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
@@ -131,8 +132,8 @@ export const listCheckInSchedules: Action = {
         messageId: message.id,
         entityId: message.entityId,
         hasCallback: !!callback,
-        stateKeys: Object.keys(state),
-        contextKeys: Object.keys(context),
+        stateKeys: state ? Object.keys(state) : [],
+        optionsKeys: Object.keys(options),
       });
 
       if (!callback) {
@@ -171,12 +172,13 @@ export const listCheckInSchedules: Action = {
       logger.info('Successfully sent check-in schedules list');
       logger.info('=== LIST CHECK-IN SCHEDULES HANDLER END ===');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== LIST CHECK-IN SCHEDULES HANDLER ERROR ===');
       logger.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
+        name: err.name || 'Unknown error',
+        message: err.message || 'No error message',
+        stack: err.stack || 'No stack trace',
       });
 
       if (callback) {

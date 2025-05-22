@@ -36,8 +36,10 @@ export const listTeamMembersAction: Action = {
   name: 'LIST_TEAM_MEMBERS',
   description: 'List all team members that have been registered in the system.',
   similes: ['LIST_TEAM_MEMBERS', 'SHOW_TEAM', 'VIEW_MEMBERS', 'GET_TEAM_LIST', 'DISPLAY_TEAM'],
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
     try {
+      if (!state) return false;
+      
       // Basic validation
       const room = state.data.room ?? (await runtime.getRoom(message.roomId));
       logger.info('Room data:', JSON.stringify(room, null, 2));
@@ -59,30 +61,33 @@ export const listTeamMembersAction: Action = {
 
       logger.info(`Valid request to list team members for server ${serverId}`);
       return true;
-    } catch (error) {
-      logger.error('Error in listTeamMembersAction validation:', error);
-      logger.error(`Error stack: ${error.stack}`);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error in listTeamMembersAction validation:', err);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
       return false;
     }
   },
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
       logger.info('=== LIST-TEAM-MEMBERS HANDLER START ===');
 
+      if (!state) return false;
+      
       if (!callback) {
         logger.warn('No callback function provided');
         return false;
       }
 
       // Get server ID from state
-      const serverId = state.data.serverId as string;
-      const serverName = state.data.serverName as string;
+      const serverId = state.data?.serverId as string;
+      const serverName = state.data?.serverName as string;
 
       if (!serverId) {
         logger.error('No server ID found in state');
@@ -119,7 +124,7 @@ export const listTeamMembersAction: Action = {
         (memory) => memory.content?.type === 'store-team-members-memory'
       );
 
-      if (!teamMembersConfig || !teamMembersConfig.content?.config?.teamMembers) {
+      if (!teamMembersConfig || !teamMembersConfig.content?.config) {
         logger.info('No team members found for this server');
         await callback(
           {
@@ -131,7 +136,8 @@ export const listTeamMembersAction: Action = {
       }
 
       // Extract and format team members
-      const teamMembers = teamMembersConfig.content.config.teamMembers as TeamMember[];
+      const configData = teamMembersConfig.content.config as { teamMembers: TeamMember[] };
+      const teamMembers = configData.teamMembers || [];
       logger.info(`Found ${teamMembers.length} team members for server ${serverId}`);
 
       if (teamMembers.length === 0) {
@@ -189,10 +195,11 @@ export const listTeamMembersAction: Action = {
 
       logger.info('=== LIST-TEAM-MEMBERS HANDLER END ===');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== LIST-TEAM-MEMBERS HANDLER ERROR ===');
-      logger.error(`Error listing team members: ${error}`);
-      logger.error(`Error stack: ${error.stack}`);
+      logger.error(`Error listing team members: ${err}`);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
 
       if (callback) {
         await callback(

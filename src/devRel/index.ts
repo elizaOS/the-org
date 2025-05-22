@@ -1,5 +1,5 @@
 import { logger } from '@elizaos/core';
-import type { Character } from '@elizaos/core/src/types';
+import type { Character } from '@elizaos/core';
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -126,7 +126,7 @@ function loadSourceCode(packagesDir: string): string[] {
 }
 
 // Load knowledge synchronously before creating the character
-const knowledge = [];
+const knowledge: string[] = [];
 
 if (process.env.DEVREL_IMPORT_KNOWLEDGE) {
   // Load documentation

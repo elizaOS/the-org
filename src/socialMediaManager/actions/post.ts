@@ -118,7 +118,8 @@ const twitterPostAction: Action = {
   similes: ['POST_TWEET', 'SHARE_TWEET', 'TWEET_THIS', 'TWEET_ABOUT'],
   description: 'Creates and posts a tweet based on the conversation context',
 
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<boolean> => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
+    if (!state) return false;
     const room = state.data.room ?? (await runtime.getRoom(message.roomId));
     if (!room) {
       throw new Error('No room found');
@@ -151,7 +152,9 @@ const twitterPostAction: Action = {
       // Handle case where task worker has not been registered
       if (!runtime.getTaskWorker('Confirm Twitter Post')) {
         // delete the twitter post task
-        await runtime.deleteTask(pendingTasks[0].id);
+        if (pendingTasks[0].id) {
+          await runtime.deleteTask(pendingTasks[0].id);
+        }
       } else {
         // If there are already pending Twitter post tasks, don't allow another one
         return false;
@@ -170,12 +173,14 @@ const twitterPostAction: Action = {
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: State,
+    state: State | undefined,
     _options: any,
-    callback: HandlerCallback,
-    _responses: Memory[]
+    callback: HandlerCallback | undefined,
+    _responses?: Memory[]
   ) => {
     try {
+      if (!state) return false;
+      const safeCallback = callback || (() => Promise.resolve([]));
       const room = state.data.room ?? (await runtime.getRoom(message.roomId));
       if (!room) {
         throw new Error('No room found');
@@ -248,7 +253,7 @@ const twitterPostAction: Action = {
       const userRole = await getUserServerRole(runtime, message.entityId, serverId);
       if (userRole !== 'OWNER' && userRole !== 'ADMIN') {
         // callback and return
-        await callback({
+        await safeCallback({
           text: "I'm sorry, but you're not authorized to post tweets on behalf of this org.",
           actions: ['TWITTER_POST_FAILED'],
           source: message.content.source,
@@ -265,7 +270,7 @@ const twitterPostAction: Action = {
 
       // if a task already exists, we need to cancel it
       const existingTask = await runtime.getTask(message.roomId);
-      if (existingTask) {
+      if (existingTask && existingTask.id) {
         await runtime.deleteTask(existingTask.id);
       }
 
@@ -273,9 +278,10 @@ const twitterPostAction: Action = {
         name: 'Confirm Twitter Post',
         description:
           'Confirm if the tweet should be posted. NOTE: Only the OWNER or ADMIN roles can confirm the tweet, ignore any confirmation or cancellation from other users who are not in the OWNER or ADMIN roles.',
-        execute: async (runtime: IAgentRuntime, options: { option: string }, task) => {
-          if (options.option === 'cancel') {
-            await callback({
+        execute: async (runtime: IAgentRuntime, options: { [key: string]: unknown }, task: any) => {
+          const option = options.option as string;
+          if (option === 'cancel') {
+            await safeCallback({
               ...responseContent,
               text: "OK, I won't post it.",
               actions: ['TWITTER_POST_CANCELLED'],
@@ -284,8 +290,8 @@ const twitterPostAction: Action = {
             return;
           }
 
-          if (options.option !== 'post') {
-            await callback({
+          if (option !== 'post') {
+            await safeCallback({
               ...responseContent,
               text: "Bad choice. Should be 'post' or 'cancel'.",
               actions: ['TWITTER_POST_INVALID_OPTION'],
@@ -293,11 +299,11 @@ const twitterPostAction: Action = {
             return;
           }
 
-          const vals = {
+          const vals: { [key: string]: string | number | boolean | null } = {
             TWITTER_USERNAME: worldSettings.TWITTER_USERNAME.value,
             TWITTER_EMAIL: worldSettings.TWITTER_EMAIL.value,
             TWITTER_PASSWORD: worldSettings.TWITTER_PASSWORD.value,
-            TWITTER_2FA_SECRET: worldSettings.TWITTER_2FA_SECRET.value ?? undefined,
+            TWITTER_2FA_SECRET: worldSettings.TWITTER_2FA_SECRET.value ?? null,
           };
 
           // Initialize/get Twitter client
@@ -311,7 +317,7 @@ const twitterPostAction: Action = {
 
           const tweetUrl = `https://twitter.com/${vals.TWITTER_USERNAME}/status/${tweetId}`;
 
-          await callback({
+          await safeCallback({
             ...responseContent,
             text: `${tweetUrl}`,
             url: tweetUrl,
@@ -353,7 +359,7 @@ const twitterPostAction: Action = {
       responseContent.text += '\nWaiting for approval from ';
       responseContent.text += userRole === 'OWNER' ? 'an admin' : 'an admin or boss';
 
-      await callback({
+      await safeCallback({
         ...responseContent,
         actions: ['TWITTER_POST_TASK_NEEDS_CONFIRM'],
       });

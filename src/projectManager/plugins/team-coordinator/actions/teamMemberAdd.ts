@@ -23,6 +23,12 @@ interface TeamMember {
   updatesFormat?: string[];
 }
 
+interface TeamMemberConfig {
+  teamMembers: TeamMember[];
+  lastUpdated: number;
+  serverId: string;
+}
+
 /**
  * Creates a consistent room ID for team members storage
  * @param serverId The server ID
@@ -70,15 +76,16 @@ async function fetchTeamMembersForServer(
     logger.info(`Found ${teamMemberMemories.length} team member records`);
 
     // Extract and return the team members
-    const teamMembers = teamMemberMemories.map((memory) => memory.content.teamMember);
+    const teamMembers = teamMemberMemories.map((memory) => memory.content.teamMember as TeamMember);
 
     // Log for debugging
     logger.info(`Successfully retrieved ${teamMembers.length} team members for server ${serverId}`);
 
     return teamMembers;
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     logger.error(`Error fetching team members for server ${serverId}:`, error);
-    logger.error(`Error stack: ${error.stack}`);
+    logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
     return [];
   }
 }
@@ -120,8 +127,10 @@ export const addTeamMemberAction: Action = {
   description:
     'Add team members into different sections with their TG names and update formats for organizational tracking and updates.',
   similes: ['ADD_TEAM_MEMBER', 'REGISTER_MEMBER', 'TRACK_TEAM', 'ADD_TO_SECTION', 'ORGANIZE_TEAM'],
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
     try {
+      if (!state) return false;
+      
       // Basic validation
       const room = state.data.room ?? (await runtime.getRoom(message.roomId));
       logger.info('Room data:', JSON.stringify(room, null, 2));
@@ -148,23 +157,26 @@ export const addTeamMemberAction: Action = {
 
       state.data.isAdmin = true;
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('Error in addTeamMemberAction validation:', error);
-      logger.error(`Error stack: ${error.stack}`);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
       return false;
     }
   },
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
       logger.info('=== RECORD-TEAM-MEMBER HANDLER START ===');
       logger.info('Message content received:', JSON.stringify(message.content, null, 2));
 
+      if (!state) return false;
+      
       if (!callback) {
         logger.warn('No callback function provided');
         return false;
@@ -178,8 +190,8 @@ export const addTeamMemberAction: Action = {
       }
 
       // Get server ID from state
-      const serverId = state.data.serverId as string;
-      const serverName = state.data.serverName as string;
+      const serverId = state.data?.serverId as string;
+      const serverName = state.data?.serverName as string;
 
       if (!serverId) {
         logger.error('No server ID found in state');
@@ -246,15 +258,17 @@ export const addTeamMemberAction: Action = {
         logger.info('Raw AI response for team member details:', parsedResponse);
 
         // Parse the response
-        let teamMembers = [];
+        let teamMembers: TeamMember[] = [];
         try {
           const cleanedResponse = parsedResponse.replace(/```json\n?|\n?```/g, '').trim();
-          teamMembers = JSON.parse(cleanedResponse);
+          const parsedData = JSON.parse(cleanedResponse);
 
           // Fix: Ensure teamMembers is an array
-          if (!Array.isArray(teamMembers)) {
+          if (!Array.isArray(parsedData)) {
             logger.warn('Parsed response is not an array, converting to array');
-            teamMembers = [teamMembers];
+            teamMembers = [parsedData as TeamMember];
+          } else {
+            teamMembers = parsedData as TeamMember[];
           }
 
           logger.info('Successfully parsed team member configuration:', teamMembers);
@@ -265,7 +279,7 @@ export const addTeamMemberAction: Action = {
         }
 
         // Validate that either TG or Discord name is present for each team member
-        const validatedTeamMembers = teamMembers.filter((member) => {
+        const validatedTeamMembers = teamMembers.filter((member: TeamMember) => {
           // Fix: Check for required fields
           if (!member.section) {
             logger.warn('Skipping team member missing section');
@@ -334,7 +348,7 @@ export const addTeamMemberAction: Action = {
           logger.info('No existing store-team-members-memory found, creating new one');
           try {
             // Store all the validatedTeamMembers in the config
-            const config = {
+            const config: TeamMemberConfig = {
               teamMembers: validatedTeamMembers,
               lastUpdated: Date.now(),
               serverId: serverId,
@@ -350,11 +364,13 @@ export const addTeamMemberAction: Action = {
                 name: 'Storing Members config',
                 source: 'team-coordinator',
                 type: ChannelType.GROUP,
+                worldId : runtime.agentId
               });
               logger.info(`Successfully created room with ID: ${roomIdForStoringTeamMembers}`);
-            } catch (roomError) {
-              logger.error(`Failed to create room: ${roomError.message}`);
-              logger.error(`Room error stack: ${roomError.stack}`);
+            } catch (error: unknown) {
+              const roomError = error as Error;
+              logger.error(`Failed to create room: ${roomError.message || 'Unknown error'}`);
+              logger.error(`Room error stack: ${roomError.stack || 'No stack trace available'}`);
             }
 
             const memory = {
@@ -371,15 +387,17 @@ export const addTeamMemberAction: Action = {
 
             await runtime.createMemory(memory, 'messages');
             logger.info('Successfully stored new report channel config');
-          } catch (configError) {
+          } catch (error: unknown) {
+            const configError = error as Error;
             logger.error('Failed to store report channel config:', configError);
-            logger.error('Error stack:', configError.stack);
+            logger.error('Error stack:', configError.stack || 'No stack trace available');
           }
         } else {
           logger.info('Found existing team members config, checking for new members to add');
 
           // Fetch existing team members from the config
-          const existingTeamMembers = existingConfig.content.config?.teamMembers || [];
+          const configData = existingConfig.content.config as TeamMemberConfig;
+          const existingTeamMembers = configData?.teamMembers || [];
           logger.info(`Found ${existingTeamMembers.length} existing team members`);
 
           // Filter out team members that already exist
@@ -404,8 +422,8 @@ export const addTeamMemberAction: Action = {
                 }
 
                 const updateFields =
-                  member.updatesFormat?.length > 0
-                    ? `\n   Fields: ${member.updatesFormat?.join(', ')}`
+                  member.updatesFormat && member.updatesFormat.length > 0
+                    ? `\n   Fields: ${member.updatesFormat.join(', ')}`
                     : '';
 
                 return `${index + 1}. Section: ${section} | ${platformInfo}${updateFields}`;
@@ -427,20 +445,22 @@ export const addTeamMemberAction: Action = {
 
             // Update the config with the new team members
             const updatedConfig = {
-              ...(existingConfig.content.config as Record<string, unknown>),
+              ...(existingConfig.content.config as TeamMemberConfig),
               teamMembers: updatedTeamMembers,
               lastUpdated: Date.now(),
             };
 
             // Update the memory with the new config
-            await runtime.updateMemory({
-              id: existingConfig.id,
-              ...existingConfig,
-              content: {
-                ...existingConfig.content,
-                config: updatedConfig,
-              },
-            });
+            if (existingConfig.id) {
+              await runtime.updateMemory({
+                id: existingConfig.id,
+                ...existingConfig,
+                content: {
+                  ...existingConfig.content,
+                  config: updatedConfig,
+                },
+              });
+            }
 
             logger.info(
               `Successfully updated team members config with ${newTeamMembers.length} new members`
@@ -448,7 +468,7 @@ export const addTeamMemberAction: Action = {
 
             // Format the newly added team members for the response
             const newMembersList = newTeamMembers
-              .map((member, index) => {
+              .map((member: TeamMember, index) => {
                 const section = member.section || 'Unassigned';
                 const format = member.format || 'Text';
 
@@ -466,7 +486,7 @@ export const addTeamMemberAction: Action = {
             // Add a callback here to respond when new members are added
             const allTeamMembers = updatedTeamMembers;
             const teamMembersList = allTeamMembers
-              .map((member, index) => {
+              .map((member: TeamMember, index) => {
                 const section = member.section || 'Unassigned';
 
                 let platformInfo = '';
@@ -477,8 +497,8 @@ export const addTeamMemberAction: Action = {
                 }
 
                 let updateFields = '';
-                if (member.updatesFormat && member.updatesFormat?.length > 0) {
-                  updateFields = ` | Update Fields: ${member.updatesFormat?.join(', ')}`;
+                if (member.updatesFormat && member.updatesFormat.length > 0) {
+                  updateFields = ` | Update Fields: ${member.updatesFormat.join(', ')}`;
                 }
 
                 return `${index + 1}. Section: ${section} | ${platformInfo}${updateFields}`;
@@ -509,13 +529,14 @@ export const addTeamMemberAction: Action = {
           (memory) => memory.content.type === 'store-team-members-memory'
         );
 
-        if (updatedConfig && updatedConfig.content.config?.teamMembers) {
-          const allTeamMembers = updatedConfig.content.config.teamMembers;
+        if (updatedConfig && updatedConfig.content.config) {
+          const configData = updatedConfig.content.config as TeamMemberConfig;
+          const allTeamMembers = configData.teamMembers || [];
           logger.info(`Retrieved ${allTeamMembers.length} total team members for response`);
 
           // Format all team members for the response
           const teamMembersList = allTeamMembers
-            .map((member, index) => {
+            .map((member: TeamMember, index) => {
               const section = member.section || 'Unassigned';
               const format = member.format || 'Text';
 
@@ -527,8 +548,8 @@ export const addTeamMemberAction: Action = {
               }
 
               let updateFields = '';
-              if (member.updatesFormat && member.updatesFormat?.length > 0) {
-                updateFields = ` | Update Fields: ${member.updatesFormat?.join(', ')}`;
+              if (member.updatesFormat && member.updatesFormat.length > 0) {
+                updateFields = ` | Update Fields: ${member.updatesFormat.join(', ')}`;
               }
 
               return `${index + 1}. Section: ${section} | ${platformInfo}${updateFields}`;
@@ -549,9 +570,10 @@ export const addTeamMemberAction: Action = {
             []
           );
         }
-      } catch (parsingError) {
+      } catch (error: unknown) {
+        const parsingError = error as Error;
         logger.error('Failed to parse team member information:', parsingError);
-        logger.error('Error stack:', parsingError.stack);
+        logger.error('Error stack:', parsingError.stack || 'No stack trace available');
 
         await callback(
           {
@@ -563,10 +585,11 @@ export const addTeamMemberAction: Action = {
       }
 
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== TEAM-MEMBER HANDLER ERROR ===');
-      logger.error(`Error processing team member recording: ${error}`);
-      logger.error(`Error stack: ${error.stack}`);
+      logger.error(`Error processing team member recording: ${err}`);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
 
       if (callback) {
         await callback(

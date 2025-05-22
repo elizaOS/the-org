@@ -15,6 +15,13 @@ import type {
 } from 'discord.js';
 import type { CheckInSchedule } from '../../../types';
 
+// Extension of CheckInSchedule with additional fields
+interface ExtendedCheckInSchedule extends CheckInSchedule {
+  teamMemberId?: string;
+  teamMemberName?: string;
+  teamMemberUserName?: string;
+}
+
 // Interface for storing report channel configuration
 interface ReportChannelConfig {
   serverId?: string; // Made optional
@@ -43,7 +50,7 @@ interface ExtendedInteraction {
   guildId?: string; // Added for server ID
 }
 
-interface DiscordService {
+interface DiscordService extends Service {
   client: {
     users: {
       fetch: (userId: string) => Promise<User>;
@@ -126,9 +133,10 @@ export class CheckInService extends Service {
         } else {
           logger.info('CustomId did not match. Received:', interaction.customId);
         }
-      } catch (error) {
-        logger.error('Error in DISCORD_INTERACTION event handler:', error);
-        logger.error('Error stack:', error.stack);
+      } catch (error: unknown) {
+        const err = error as Error;
+        logger.error('Error in DISCORD_INTERACTION event handler:', err);
+        logger.error('Error stack:', err.stack);
       }
     });
 
@@ -146,22 +154,26 @@ export class CheckInService extends Service {
         logger.error('Discord service not found in runtime');
         throw new Error('Discord service not found');
       }
+      
+      // Cast to DiscordService after null check
+      const typedDiscordService = discordService as unknown as DiscordService;
 
       // Log what's in the service to see its structure
-      logger.info(`Discord service structure: ${JSON.stringify(Object.keys(discordService))}`);
+      logger.info(`Discord service structure: ${JSON.stringify(Object.keys(typedDiscordService))}`);
 
       // Check if client exists and is ready
-      logger.info(`Discord client exists: ${!!discordService?.client}`);
-      if (!discordService?.client) {
+      logger.info(`Discord client exists: ${!!typedDiscordService?.client}`);
+      if (!typedDiscordService?.client) {
         logger.error('Discord client not initialized in service');
         throw new Error('Discord client not initialized');
       }
 
       logger.info('Discord client successfully validated');
-      return discordService as DiscordService;
-    } catch (error) {
-      logger.error(`Error ensuring Discord client: ${error.message}`);
-      logger.error(`Error stack: ${error.stack}`);
+      return typedDiscordService;
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error(`Error ensuring Discord client: ${err.message}`);
+      logger.error(`Error stack: ${err.stack}`);
       throw error;
     }
   }
@@ -171,24 +183,29 @@ export class CheckInService extends Service {
       logger.info('=== HANDLING CHECKIN SUBMISSION ===');
 
       const selections = interaction.selections;
-      const userId = interaction.user || interaction.member?.user?.id;
-      let userDetails: any;
+      const userId = interaction.user?.id || interaction.member?.user?.id;
+      let userDetails: User | null = null;
 
       // TODO : get discord service cool or in start
       const discordService = (await this.ensureDiscordClient(this.runtime)) as DiscordService;
 
       // Fetch user details
       try {
-        userDetails = await discordService.client.users.fetch(userId);
-        logger.info('Fetched user details:', {
-          id: userDetails.id,
-          username: userDetails.username,
-          displayName: userDetails.displayName,
-          bot: userDetails.bot,
-          createdAt: userDetails.createdAt,
-        });
-      } catch (userError) {
-        logger.error('Error fetching user details:', userError);
+        if (userId) {
+          userDetails = await discordService.client.users.fetch(userId);
+          logger.info('Fetched user details:', {
+            id: userDetails.id,
+            username: userDetails.username,
+            displayName: userDetails.displayName,
+            bot: userDetails.bot,
+            createdAt: userDetails.createdAt,
+          });
+        } else {
+          logger.error('No user ID found in interaction');
+        }
+      } catch (userError: unknown) {
+        const err = userError as Error;
+        logger.error('Error fetching user details:', err);
         logger.error('User ID that caused error:', userId);
       }
 
@@ -209,7 +226,7 @@ export class CheckInService extends Service {
       }
 
       // Create check-in schedule
-      const schedule: CheckInSchedule = {
+      const schedule: ExtendedCheckInSchedule = {
         type: 'team-member-checkin-schedule',
         scheduleId: createUniqueUuid(this.runtime, `schedule-${Date.now()}`),
         teamMemberId: userId?.toString(),
@@ -219,6 +236,8 @@ export class CheckInService extends Service {
         channelId: selections.checkin_channel?.[0] || '',
         frequency: (selections.checkin_frequency?.[0] || 'WEEKLY') as CheckInSchedule['frequency'],
         checkInTime: selections.checkin_time?.[0] || '09:00',
+        serverId: interaction.guildId,
+        source: 'discord',
         createdAt: new Date().toISOString(),
       };
 
@@ -235,13 +254,14 @@ export class CheckInService extends Service {
         ephemeral: true,
         interaction,
       });
-    } catch (error) {
-      logger.error('Error in handleCheckInSubmission:', error);
-      logger.error('Error stack:', error.stack);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error in handleCheckInSubmission:', err);
+      logger.error('Error stack:', err.stack);
 
       try {
         // Check if this is a duplicate key error
-        if (error.code === '23505' && error.constraint === 'memories_pkey') {
+        if ('code' in err && err.code === '23505' && 'constraint' in err && err.constraint === 'memories_pkey') {
           await this.runtime.emitEvent('DISCORD_RESPONSE', {
             type: 'REPLY',
             content:
@@ -257,13 +277,14 @@ export class CheckInService extends Service {
             interaction,
           });
         }
-      } catch (replyError) {
-        logger.error('Failed to send error message:', replyError);
+      } catch (replyError: unknown) {
+        const replyErr = replyError as Error;
+        logger.error('Failed to send error message:', replyErr);
       }
     }
   }
 
-  private async storeCheckInSchedule(roomId: string, schedule: CheckInSchedule): Promise<void> {
+  private async storeCheckInSchedule(roomId: string, schedule: ExtendedCheckInSchedule): Promise<void> {
     try {
       // First create the room if it doesn't exist
       await this.runtime.ensureRoomExists({
@@ -271,6 +292,7 @@ export class CheckInService extends Service {
         name: 'Check-in Schedules',
         source: 'team-coordinator',
         type: ChannelType.GROUP,
+        worldId: this.runtime.agentId,
       });
 
       const timestamp = Date.now();
@@ -289,8 +311,9 @@ export class CheckInService extends Service {
       logger.info('Storing check-in schedule in memory:', memory);
       await this.runtime.createMemory(memory, 'messages');
       logger.info('Successfully stored check-in schedule in memory');
-    } catch (error) {
-      logger.error('Failed to store check-in schedule:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Failed to store check-in schedule:', err);
       throw error;
     }
   }
@@ -302,14 +325,15 @@ export class CheckInService extends Service {
       logger.info('Full interaction object:', JSON.stringify(interaction, null, 2));
 
       // Parse server info from form data
-      let serverInfo: any;
+      let serverInfo: { serverId?: string; serverName?: string } = {};
       try {
         if (interaction.selections?.server_info?.[0]) {
           serverInfo = JSON.parse(interaction.selections.server_info[0]);
           logger.info('Parsed server info:', serverInfo);
         }
-      } catch (parseError) {
-        logger.error('Error parsing server info:', parseError);
+      } catch (parseError: unknown) {
+        const err = parseError as Error;
+        logger.error('Error parsing server info:', err);
       }
 
       const selections = interaction.selections;
@@ -338,9 +362,10 @@ export class CheckInService extends Service {
         ephemeral: true,
         interaction,
       });
-    } catch (error) {
-      logger.error('Error in handleReportChannelSubmission:', error);
-      logger.error('Error stack:', error.stack);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error in handleReportChannelSubmission:', err);
+      logger.error('Error stack:', err.stack);
     }
   }
 
@@ -353,6 +378,7 @@ export class CheckInService extends Service {
         name: 'Report Channel Configurations',
         source: 'team-coordinator',
         type: ChannelType.GROUP,
+        worldId: this.runtime.agentId,
       });
 
       const memory = {
@@ -372,8 +398,9 @@ export class CheckInService extends Service {
         this.reportChannelConfigs.set(config.serverId, config);
       }
       logger.info('Successfully stored report channel config');
-    } catch (error) {
-      logger.error('Failed to store report channel config:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Failed to store report channel config:', err);
       throw error;
     }
   }
@@ -381,6 +408,16 @@ export class CheckInService extends Service {
   private async loadReportChannelConfigs(): Promise<void> {
     try {
       const roomId = createUniqueUuid(this.runtime, 'report-channel-config');
+      
+      // Ensure the room exists before trying to access it
+      await this.runtime.ensureRoomExists({
+        id: roomId as UUID,
+        name: 'Report Channel Configurations',
+        source: 'team-coordinator',
+        type: ChannelType.GROUP,
+        worldId: this.runtime.agentId,
+      });
+      
       const memories = await this.runtime.getMemories({
         roomId: roomId as UUID,
         tableName: 'messages',
@@ -395,8 +432,9 @@ export class CheckInService extends Service {
           }
         }
       }
-    } catch (error) {
-      logger.error('Error loading report channel configs:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error loading report channel configs:', err);
     }
   }
 

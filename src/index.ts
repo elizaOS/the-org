@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
-dotenv.config({ path: '../../.env' });
+dotenv.config({ path: '../.env' });
 
-import { logger, ProjectAgent } from '@elizaos/core';
+import { logger, ProjectAgent, Character } from '@elizaos/core';
 import communityManager from './communityManager';
 import devRel from './devRel';
 import liaison from './liaison';
@@ -13,7 +13,7 @@ import socialMediaManager from './socialMediaManager';
  * @param agent The agent to check
  * @returns boolean indicating if all required environment variables are set
  */
-function hasRequiredEnvVars(agent: ProjectAgent): boolean {
+function hasRequiredEnvVars(agent: ProjectAgent | { character: Partial<Character>; init: (runtime: any) => Promise<void> }): boolean {
   // Get which platform plugins the agent uses
   const usesDiscord = agent.character.plugins?.includes('@elizaos/plugin-discord');
   const usesTelegram = agent.character.plugins?.includes('@elizaos/plugin-telegram');
@@ -26,26 +26,26 @@ function hasRequiredEnvVars(agent: ProjectAgent): boolean {
 
   if (usesDiscord) {
     // Get the actual values from agent settings
-    const discordId = agent.character.settings.secrets.DISCORD_APPLICATION_ID;
-    const discordToken = agent.character.settings.secrets.DISCORD_API_TOKEN;
+    const discordId = agent.character.settings?.secrets?.DISCORD_APPLICATION_ID;
+    const discordToken = agent.character.settings?.secrets?.DISCORD_API_TOKEN;
 
     if (discordId && discordToken) {
       hasValidPlatform = true;
-      logger.debug(`Agent "${agent.character.name}" has Discord configuration`);
+      logger.debug(`Agent "${agent.character.name || 'Unknown'}" has Discord configuration`);
     }
   }
 
   if (usesTelegram) {
-    const telegramToken = agent.character.settings.secrets.TELEGRAM_BOT_TOKEN;
+    const telegramToken = agent.character.settings?.secrets?.TELEGRAM_BOT_TOKEN;
 
     if (telegramToken) {
       hasValidPlatform = true;
-      logger.debug(`Agent "${agent.character.name}" has Telegram configuration`);
+      logger.debug(`Agent "${agent.character.name || 'Unknown'}" has Telegram configuration`);
     }
   }
 
   if (!hasValidPlatform) {
-    logger.warn(`Agent "${agent.character.name}" disabled - missing platform configuration`);
+    logger.warn(`Agent "${agent.character.name || 'Unknown'}" disabled - missing platform configuration`);
   }
 
   return hasValidPlatform;
@@ -75,29 +75,24 @@ if (potentialAgentFlags.length > 0) {
   const requestedAgentNames = potentialAgentFlags.map((arg) =>
     arg.replace(/^--/, '').toLowerCase()
   );
-  const matchedAgents = allAgents.filter((agent) =>
-    // Only match by object key, not by character name anymore
-    requestedAgentNames.includes(
-      Object.keys({
-        devRel,
-        communityManager,
-        liaison,
-        projectManager,
-        socialMediaManager,
-      })
-        .find(
-          (key) =>
-            ({
-              devRel,
-              communityManager,
-              liaison,
-              projectManager,
-              socialMediaManager,
-            })[key] === agent
-        )
-        ?.toLowerCase()
-    )
-  );
+  
+  const agentsMap = {
+    devRel,
+    communityManager,
+    liaison,
+    projectManager,
+    socialMediaManager,
+  };
+
+  const matchedAgents = allAgents.filter((agent) => {
+    // Find the key in agentsMap that corresponds to this agent
+    const agentKey = Object.keys(agentsMap).find(
+      (key) => agentsMap[key as keyof typeof agentsMap] === agent
+    );
+    
+    // Check if the agent's key is in the requested names
+    return agentKey ? requestedAgentNames.includes(agentKey.toLowerCase()) : false;
+  });
 
   console.log('allAgents', allAgents);
   console.log('matchedAgents', matchedAgents);
@@ -108,24 +103,14 @@ if (potentialAgentFlags.length > 0) {
     logger.warn(
       `No matching agents found for flags: ${potentialAgentFlags.join(', ')}. Available agent names (use --name):`
     );
+    
     allAgents.forEach((agent) => {
-      const objectKey = Object.keys({
-        devRel,
-        communityManager,
-        liaison,
-        projectManager,
-        socialMediaManager,
-      }).find(
-        (key) =>
-          ({
-            devRel,
-            communityManager,
-            liaison,
-            projectManager,
-            socialMediaManager,
-          })[key] === agent
+      const objectKey = Object.keys(agentsMap).find(
+        (key) => agentsMap[key as keyof typeof agentsMap] === agent
       );
-      logger.warn(`  --${objectKey} (for ${agent.character.name})`);
+      if (objectKey) {
+        logger.warn(`  --${objectKey} (for ${agent.character.name || 'Unknown'})`);
+      }
     });
     // If flags were passed but none matched, we should probably not run all agents.
     // Setting enabledAgents to empty will trigger the "NO AGENTS AVAILABLE" message later.

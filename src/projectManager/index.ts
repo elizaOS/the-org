@@ -379,7 +379,7 @@ const config: OnboardingConfig = {
 
 // Import our plugins for Jimmy
 import { plugins } from './plugins';
-import { fetchDiscordChannels } from './plugins/team-coordinator/services/TeamUpdateTrackerService';
+// import { fetchDiscordChannels } from './plugins/team-coordinator/services/TeamUpdateTrackerService';
 export const projectManager: ProjectAgent = {
   character,
   plugins,

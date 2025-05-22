@@ -7,6 +7,7 @@ import {
   type Memory,
   ModelType,
   type State,
+  type Service,
   composePromptFromState,
   createUniqueUuid,
   type UUID,
@@ -22,12 +23,35 @@ interface DiscordComponentInteraction {
   selections?: Record<string, string[]>;
 }
 
+interface DiscordService extends Service {
+  client?: {
+    guilds: {
+      cache: {
+        get: (id: string) => any;
+      };
+    };
+  };
+}
+
 interface ReportChannelConfig {
   serverId?: string;
   serverName?: string;
   channelId: string;
   createdAt: string;
   source?: string; // Add source field
+}
+
+interface CheckInSchedule {
+  type: string;
+  scheduleId: UUID;
+  teamMemberUserName?: string;
+  checkInType: string;
+  channelId: string;
+  frequency: 'DAILY' | 'WEEKLY' | 'BI-WEEKLY' | 'MONTHLY' | 'WEEKDAYS';
+  checkInTime: string;
+  source: string;
+  createdAt: string;
+  serverId: string;
 }
 
 // Required Discord configuration fields
@@ -61,8 +85,9 @@ async function validateDiscordConfig(
     // }
 
     return { isValid: true };
-  } catch (error) {
-    logger.error('Error validating Discord config:', error);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error('Error validating Discord config:', err);
     return {
       isValid: false,
       error: 'Error validating Discord configuration',
@@ -73,13 +98,13 @@ async function validateDiscordConfig(
 /**
  * Ensures a Discord client exists and is ready
  * @param {IAgentRuntime} runtime - The Agent runtime
- * @returns {Promise<any>} The Discord client
+ * @returns {Promise<DiscordService>} The Discord client
  */
-async function ensureDiscordClient(runtime: IAgentRuntime) {
+async function ensureDiscordClient(runtime: IAgentRuntime): Promise<DiscordService> {
   logger.info('Ensuring Discord client is available');
 
   try {
-    const discordService = runtime.getService('discord');
+    const discordService = runtime.getService('discord') as DiscordService;
     logger.info(`Discord service found: ${!!discordService}`);
 
     if (!discordService) {
@@ -99,9 +124,10 @@ async function ensureDiscordClient(runtime: IAgentRuntime) {
 
     logger.info('Discord client successfully validated');
     return discordService;
-  } catch (error) {
-    logger.error(`Error ensuring Discord client: ${error.message}`);
-    logger.error(`Error stack: ${error.stack}`);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`Error ensuring Discord client: ${err.message || 'Unknown error'}`);
+    logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
     throw error;
   }
 }
@@ -117,8 +143,10 @@ export const recordCheckInAction: Action = {
     'REPORT_STATUS',
     'LOG_TEAM_UPDATE',
   ],
-  validate: async (runtime: IAgentRuntime, message: Memory, state: State) => {
+  validate: async (runtime: IAgentRuntime, message: Memory, state: State | undefined): Promise<boolean> => {
     try {
+      if (!state) return false;
+      
       // Existing validation code...
       const room = state.data.room ?? (await runtime.getRoom(message.roomId));
       logger.info('Room data:', JSON.stringify(room, null, 2));
@@ -166,48 +194,54 @@ export const recordCheckInAction: Action = {
       // Ensure Discord client is available
 
       return true;
-    } catch (error) {
-      logger.error('Error in recordCheckInAction validation:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      logger.error('Error in recordCheckInAction validation:', err);
       return false;
     }
   },
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
-    state: Record<string, unknown>,
-    context: Record<string, unknown>,
+    state: State | undefined,
+    options: Record<string, unknown> = {},
     callback?: HandlerCallback
   ): Promise<boolean> => {
     try {
+      if (!state) return false;
+      if (!callback) {
+        logger.warn('No callback function provided');
+        return false;
+      }
+      
       // Get Discord client first
       logger.info('Attempting to get Discord client...');
-      let discordService: any;
+      let discordService: DiscordService;
 
       try {
         discordService = await ensureDiscordClient(runtime);
         logger.info('Successfully retrieved Discord service with client');
-      } catch (discordError) {
-        logger.error(`Failed to get Discord client: ${discordError.message}`);
+      } catch (error: unknown) {
+        const discordError = error as Error;
+        logger.error(`Failed to get Discord client: ${discordError.message || 'Unknown error'}`);
 
         // Try to proceed anyway or handle gracefully
-        if (callback) {
-          await callback(
-            {
-              text: '❌ Unable to connect to Discord services. Please try again later or contact support.',
-            },
-            []
-          );
-        }
+        await callback(
+          {
+            text: '❌ Unable to connect to Discord services. Please try again later or contact support.',
+          },
+          []
+        );
         return false;
       }
 
-      let textChannels = [];
+      let textChannels: Array<{id: string; name: string; type: string}> = [];
 
       // Check if Discord connection is established
       logger.info('Checking Discord connection status...');
 
       // Get room and server ID
-      const room = state.data.room ?? (await runtime.getRoom(message.roomId));
+      const room = state.data?.room ?? (await runtime.getRoom(message.roomId));
       if (!room) {
         logger.error('No room found for the message');
         return false;
@@ -245,9 +279,10 @@ export const recordCheckInAction: Action = {
           } else {
             logger.error(`Could not find guild with ID ${serverId}`);
           }
-        } catch (error) {
-          logger.error('Error fetching Discord channels:', error);
-          logger.debug('Error details:', error instanceof Error ? error.stack : String(error));
+        } catch (error: unknown) {
+          const err = error as Error;
+          logger.error('Error fetching Discord channels:', err);
+          logger.debug('Error details:', err instanceof Error ? err.stack : String(err));
         }
       } else {
         logger.warn('Discord service or client is not available');
@@ -258,11 +293,6 @@ export const recordCheckInAction: Action = {
       // Rest of your existing handler code...
       logger.info('=== RECORD-CHECK-IN HANDLER START ===');
       logger.info('Message content received:', JSON.stringify(message.content, null, 2));
-
-      if (!callback) {
-        logger.warn('No callback function provided');
-        return false;
-      }
 
       // Extract check-in details from user message
       logger.info('Extracting check-in details from user message');
@@ -280,7 +310,7 @@ export const recordCheckInAction: Action = {
 
       // Add table name to getMemories call
       const memories = await runtime.getMemories({
-        roomId: roomId as UUID,
+        roomId: roomId,
         tableName: 'messages',
       });
       logger.info('Retrieved memories:', JSON.stringify(memories, null, 2));
@@ -294,6 +324,9 @@ export const recordCheckInAction: Action = {
         return isReportConfig;
       });
       logger.info('Found existing config:', existingConfig);
+      
+      // Get message source
+      const messageSource = message.content.source as string || room.source || 'unknown';
 
       const questionPrompt = `
         Determine if the user is asking a question about setting up a check-in schedule.
@@ -361,7 +394,7 @@ export const recordCheckInAction: Action = {
                 `   • Monthly\n` +
                 `5️⃣ **Time:** What time should check-ins happen? (e.g., 9:00 AM UTC) - Please note all times will be in UTC timezone` +
                 `Please remember to type "Record Check-in details" when you're finished to save your configuration.`,
-              source: message.source,
+              source: messageSource,
             },
             []
           );
@@ -402,7 +435,7 @@ export const recordCheckInAction: Action = {
                 `   • Custom\n\n` +
                 `4️⃣ **Time:** What time should check-ins happen? (e.g., 9:00 AM UTC)` +
                 `Please remember to type "Record Check-in details" when you're finished to save your configuration.`,
-              source: message.source,
+              source: messageSource,
             },
             []
           );
@@ -455,12 +488,13 @@ export const recordCheckInAction: Action = {
         checkInConfig = JSON.parse(cleanedResponse);
 
         logger.info('Successfully parsed check-in configuration:', checkInConfig);
-      } catch (error) {
-        logger.error('Failed to parse check-in configuration:', error);
+      } catch (error: unknown) {
+        const err = error as Error;
+        logger.error('Failed to parse check-in configuration:', err);
         logger.error('Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
+          name: err.name || 'Unknown',
+          message: err.message || 'No message',
+          stack: err.stack || 'No stack trace',
         });
         return false;
       }
@@ -500,11 +534,9 @@ export const recordCheckInAction: Action = {
         logger.info('No existing report channel config found, creating new one');
         try {
           // Extract source information
-          const messageSource = message.source || room.source || 'unknown';
+          const messageSource = message.content.source as string || room.source || 'unknown';
 
-          logger.info(
-            `Message source for report config: ${messageSource}, sourceId: ${messageSourceId}`
-          );
+          logger.info(`Message source for report config: ${messageSource}`);
 
           const config: ReportChannelConfig = {
             serverId: serverId,
@@ -525,11 +557,13 @@ export const recordCheckInAction: Action = {
               name: 'Report Channel Configurations',
               source: 'team-coordinator',
               type: ChannelType.GROUP,
+              worldId: runtime.agentId,
             });
             logger.info(`Successfully created room with ID: ${roomId}`);
-          } catch (roomError) {
-            logger.error(`Failed to create room: ${roomError.message}`);
-            logger.error(`Room error stack: ${roomError.stack}`);
+          } catch (roomError: unknown) {
+            const roomErrorInstance = roomError as Error;
+            logger.error(`Failed to create room: ${roomErrorInstance.message}`);
+            logger.error(`Room error stack: ${roomErrorInstance.stack}`);
             // Continue even if room creation fails - it might already exist
           }
 
@@ -547,9 +581,10 @@ export const recordCheckInAction: Action = {
 
           await runtime.createMemory(memory, 'messages');
           logger.info('Successfully stored new report channel config');
-        } catch (configError) {
-          logger.error('Failed to store report channel config:', configError);
-          logger.error('Error stack:', configError.stack);
+        } catch (configError: unknown) {
+          const err = configError as Error;
+          logger.error('Failed to store report channel config:', err);
+          logger.error('Error stack:', err.stack || 'No stack trace');
         }
       }
 
@@ -558,7 +593,7 @@ export const recordCheckInAction: Action = {
         logger.info('Storing check-in schedule:', checkInConfig);
 
         // Extract source information from the message or room
-        const messageSource = message.source || room.source || 'unknown';
+        const messageSource = message.content.source as string || room.source || 'unknown';
 
         logger.info(`Message source: ${messageSource}`);
 
@@ -587,11 +622,13 @@ export const recordCheckInAction: Action = {
             name: 'Check-in Schedules',
             source: 'team-coordinator',
             type: ChannelType.GROUP,
+            worldId: runtime.agentId,
           });
           logger.info(`Successfully ensured room exists with ID: ${roomId}`);
-        } catch (roomError) {
-          logger.error(`Failed to ensure room exists: ${roomError.message}`);
-          logger.error(`Room error stack: ${roomError.stack}`);
+        } catch (roomError: unknown) {
+          const err = roomError as Error;
+          logger.error(`Failed to ensure room exists: ${err.message || 'Unknown error'}`);
+          logger.error(`Room error stack: ${err.stack || 'No stack trace'}`);
           // Continue even if room creation fails - it might already exist
         }
 
@@ -610,9 +647,10 @@ export const recordCheckInAction: Action = {
         logger.info('Storing check-in schedule in memory:', scheduleMemory);
         await runtime.createMemory(scheduleMemory, 'messages');
         logger.info('Successfully stored check-in schedule in memory');
-      } catch (scheduleError) {
-        logger.error('Failed to store check-in schedule:', scheduleError);
-        logger.error('Error stack:', scheduleError.stack);
+      } catch (scheduleError: unknown) {
+        const err = scheduleError as Error;
+        logger.error('Failed to store check-in schedule:', err);
+        logger.error('Error stack:', err.stack || 'No stack trace');
       }
       // Send success message to the user
       logger.info('Sending success message to user');
@@ -626,10 +664,11 @@ export const recordCheckInAction: Action = {
       }
       logger.info('Check-in setup message sent successfully');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       logger.error('=== CHECK-IN HANDLER ERROR ===');
-      logger.error(`Error processing check-in schedule setup: ${error}`);
-      logger.error(`Error stack: ${error.stack}`);
+      logger.error(`Error processing check-in schedule setup: ${err}`);
+      logger.error(`Error stack: ${err.stack || 'No stack trace available'}`);
       return false;
     }
   },

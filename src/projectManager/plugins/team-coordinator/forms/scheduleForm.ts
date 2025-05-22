@@ -1,6 +1,35 @@
 import { type Content, logger, type IAgentRuntime } from '@elizaos/core';
 import type { HandlerCallback } from '@elizaos/core';
 
+// Define interfaces for Discord component types
+interface DiscordComponent {
+  type: number;
+}
+
+interface DiscordActionRow extends DiscordComponent {
+  type: 1;
+  components: DiscordComponent[];
+}
+
+interface DiscordSelectMenu extends DiscordComponent {
+  type: 3;
+  custom_id: string;
+  placeholder: string;
+  options: Array<{
+    label: string;
+    value: string;
+    description?: string;
+  }>;
+  required?: boolean;
+}
+
+interface DiscordButton extends DiscordComponent {
+  type: 2;
+  style: number;
+  custom_id: string;
+  label: string;
+}
+
 /**
  * Sends a check-in schedule setup form to Discord
  * @param callback - The callback function to handle form submission
@@ -39,7 +68,7 @@ export async function sendCheckInScheduleForm(
   // IMPORTANT: Discord API limits messages to 5 action rows maximum
   // Create components based on whether we have channels or not
   // We'll use different layouts to stay within the 5-component limit
-  const formComponents = [];
+  const formComponents: DiscordActionRow[] = [];
   logger.debug('Building form components...');
 
   // Row 1: Always include check-in type selector
@@ -77,7 +106,7 @@ export async function sendCheckInScheduleForm(
             description: 'Team reflection and improvement discussion',
           },
         ],
-      },
+      } as DiscordSelectMenu,
     ],
   });
   logger.debug('Added check-in type selector (1/5 components)');
@@ -92,7 +121,7 @@ export async function sendCheckInScheduleForm(
           custom_id: 'checkin_channel',
           placeholder: 'Select channel for check-in',
           options: channelOptions,
-        },
+        } as DiscordSelectMenu,
       ],
     });
     logger.debug('Added channel selector (2/5 components)');
@@ -138,7 +167,7 @@ export async function sendCheckInScheduleForm(
             description: 'Custom schedule',
           },
         ],
-      },
+      } as DiscordSelectMenu,
     ],
   });
   logger.debug('Added frequency selector (3/5 components)');
@@ -178,7 +207,7 @@ export async function sendCheckInScheduleForm(
           { label: '6:00 PM', value: '18:00' },
           { label: '6:30 PM', value: '18:30' },
         ],
-      },
+      } as DiscordSelectMenu,
     ],
   });
   logger.debug('Added time selector (4/5 components)');
@@ -192,13 +221,13 @@ export async function sendCheckInScheduleForm(
         style: 1, // PRIMARY
         custom_id: 'submit_checkin_schedule',
         label: 'Create Check-in Schedule',
-      },
+      } as DiscordButton,
       {
         type: 2, // BUTTON
         style: 2, // SECONDARY
         custom_id: 'cancel_checkin_schedule',
         label: 'Cancel',
-      },
+      } as DiscordButton,
     ],
   });
   logger.debug('Added submit/cancel buttons (5/5 components)');
@@ -226,9 +255,10 @@ export async function sendCheckInScheduleForm(
 
     await callback(content, []);
     logger.info('Successfully sent check-in schedule form');
-  } catch (error) {
-    logger.error(`Error sending check-in schedule form: ${error}`);
-    logger.error('Error stack:', error.stack);
+  } catch (error: unknown) {
+    const err = error as Error;
+    logger.error(`Error sending check-in schedule form: ${err}`);
+    logger.error('Error stack:', err.stack);
     throw error;
   }
 }
